@@ -1,5 +1,5 @@
-python-telegram-bot==13.15
-PyMuPDF==1.22.5
-PyPDF2==3.1.1
-python-dotenv==1.0.0
-Pillow==10.0.0
+python-telegram-bot
+PyMuPDF
+PyPDF2
+python-dotenv
+Pillow
