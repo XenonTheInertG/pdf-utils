@@ -1,0 +1,71 @@
+name: Run Telegram PDF Bot
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  push:
+    branches:
+      - main
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Set env variables
+        run: |
+          echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> $GITHUB_ENV
+          echo "WATERMARK_KEYWORDS=${{ secrets.WATERMARK_KEYWORDS }}" >> $GITHUB_ENV
+      - name: Run bot with auto-restart
+        continue-on-error: true
+        run: |
+          SECONDS=0
+          MAX_SECONDS=20400  # 340 minutes
+          while [ $SECONDS -lt $MAX_SECONDS ]; do
+              python bot.py || echo "Bot crashed, restarting in 10s..."
+              sleep 10
+          donename: Run Telegram PDF Bot
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  push:
+    branches:
+      - main
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Set env variables
+        run: |
+          echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> $GITHUB_ENV
+          echo "WATERMARK_KEYWORDS=${{ secrets.WATERMARK_KEYWORDS }}" >> $GITHUB_ENV
+      - name: Run bot with auto-restart
+        continue-on-error: true
+        run: |
+          SECONDS=0
+          MAX_SECONDS=20400  # 340 minutes
+          while [ $SECONDS -lt $MAX_SECONDS ]; do
+              python bot.py || echo "Bot crashed, restarting in 10s..."
+              sleep 10
+          done
