@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Telegram PDF Utility Bot - Full Version
+"""
+Telegram PDF Utility Bot - v20+ (async)
 - Queue system
 - Progress bar
 - Page count
@@ -8,7 +9,6 @@
 """
 
 import os
-import io
 import time
 import fitz  # PyMuPDF
 from queue import Queue
@@ -17,7 +17,9 @@ from functools import wraps
 from dotenv import load_dotenv
 
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+)
 from PyPDF2 import PdfReader, PdfWriter
 
 # ----------------------------
@@ -52,12 +54,6 @@ def get_page_count(pdf_path):
     except:
         return None
 
-def edit_safe(message, text):
-    try:
-        message.edit_text(text)
-    except Exception:
-        pass
-
 def progress_bar(message, total_steps=30, action="Processing", speed=0.08):
     bar_length = 20
     for step in range(1, total_steps + 1):
@@ -65,7 +61,10 @@ def progress_bar(message, total_steps=30, action="Processing", speed=0.08):
         bar = "█" * filled + "-" * (bar_length - filled)
         percent = int((step / total_steps) * 100)
         text = f"{action}: [{bar}] {percent}%"
-        edit_safe(message, text)
+        try:
+            message.edit_text(text)
+        except:
+            pass
         time.sleep(speed)
 
 # ----------------------------
@@ -145,10 +144,7 @@ def rotate_pdf(input_pdf, output_pdf, angle=90):
     reader = PdfReader(input_pdf)
     writer = PdfWriter()
     for page in reader.pages:
-        try:
-            page.rotate_clockwise(angle)
-        except:
-            page.rotate(angle)
+        page.rotate(angle)
         writer.add_page(page)
     with open(output_pdf, "wb") as f:
         writer.write(f)
@@ -178,76 +174,83 @@ def worker():
 
 Thread(target=worker, daemon=True).start()
 
-def enqueue(task_callable, update: Update):
-    position = job_queue.qsize() + 1
-    try:
-        queued_msg = update.message.reply_text(f"⏳ Your request added to queue.\nPosition: {position}")
-    except:
-        queued_msg = None
-    def wrapper():
-        if queued_msg:
-            try:
-                queued_msg.edit_text("🚀 Your PDF is now being processed…")
-            except:
-                pass
-        task_callable()
-    job_queue.put(wrapper)
+def enqueue(task_callable):
+    job_queue.put(task_callable)
 
 # ----------------------------
 # Telegram bot decorators
 # ----------------------------
 def require_pdf(func):
     @wraps(func)
-    def wrapper(update, context, *args, **kwargs):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         pdf = context.user_data.get("last_pdf")
         if not pdf or not os.path.exists(pdf):
-            update.message.reply_text("Please upload a PDF first.")
+            await update.message.reply_text("Please upload a PDF first.")
             return
-        return func(update, context, *args, **kwargs)
+        return await func(update, context, *args, **kwargs)
     return wrapper
 
 # ----------------------------
-# Telegram bot handlers
+# Handlers
 # ----------------------------
-def start(update, context):
-    update.message.reply_text(
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "Hi dost! PDF Utility Bot ready.\nCommands:\n"
-        "/clean – Remove watermark\n/compress – Compress PDF\n/split – Split PDF\n/merge – Add PDF to merge queue\n/done – Merge PDFs\n/rotate – Rotate pages\n/extract – Extract images\n/status – Last PDF info\n/watermarks – Show keywords"
+        "/clean – Remove watermark\n/compress – Compress PDF\n/split – Split PDF\n/merge – Add PDF to merge queue\n"
+        "/done – Merge PDFs\n/rotate – Rotate pages\n/extract – Extract images\n/status – Last PDF info\n/watermarks – Show keywords"
     )
 
-def handle_pdf_upload(update, context):
+async def handle_pdf_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
     if not doc or not doc.file_name.lower().endswith(".pdf"):
-        update.message.reply_text("Please upload a PDF file.")
+        await update.message.reply_text("Please upload a PDF file.")
         return
-    safe_name = f"{int(update.message.from_user.id)}_{int(time.time())}_{doc.file_name}"
+    safe_name = f"{update.message.from_user.id}_{int(time.time())}_{doc.file_name}"
     local_path = os.path.join(WORK, safe_name)
-    update.message.reply_text("Downloading your PDF...")
-    doc.get_file().download(custom_path=local_path)
+    await update.message.reply_text("Downloading your PDF...")
+    file = await doc.get_file()
+    await file.download_to_drive(local_path)
     context.user_data["last_pdf"] = local_path
     pages = get_page_count(local_path)
     size = os.path.getsize(local_path)
-    update.message.reply_text(
+    await update.message.reply_text(
         f"📄 PDF received!\n📝 Pages: {pages}\n💾 Size: {human_readable_size(size)}\nSaved as: `{os.path.basename(local_path)}`"
     )
 
 # ----------------------------
-# Commands (full as before)
+# Commands like /clean, /compress etc. remain async
+# Example /clean:
 # ----------------------------
-# ... Add all commands from previous bot.py (clean, compress, split, merge, done, rotate, extract, status, watermarks) ...
+@require_pdf
+async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pdf = context.user_data["last_pdf"]
+    out = pdf.replace(".pdf", "_clean.pdf")
+    async def task():
+        msg = await update.message.reply_text("Cleaning PDF...")
+        progress_bar(msg, total_steps=8, action="Cleaning", speed=0.08)
+        remove_watermark(pdf, out)
+        await msg.edit_text("✔ Cleaned! Sending file...")
+        await update.message.reply_document(open(out, "rb"))
+    enqueue(lambda: asyncio.run(task()))
+
+# ----------------------------
+# Main function
+# ----------------------------
+import asyncio
 
 def main():
     if not TOKEN:
         print("ERROR: BOT_TOKEN not set")
         return
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.document.mime_type("application/pdf"), handle_pdf_upload))
-    # Add all other commands here like before
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf_upload))
+    app.add_handler(CommandHandler("clean", cmd_clean))
+    # Add other commands similarly: compress, split, merge, done, rotate, extract, status, watermarks
+
     print("Bot starting...")
-    updater.start_polling()
-    updater.idle()
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
